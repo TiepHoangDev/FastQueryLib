@@ -58,6 +58,11 @@ namespace FastQueryLib
             return builder;
         }
 
+        public static SqlConnection CreateConnection(string sqlConnectionString)
+        {
+            return new SqlConnection(sqlConnectionString);
+        }
+
         public static SqlCommand CreateCommand(this SqlConnection dbConnection, string commandText, Dictionary<string, object>? parameters = null, CommandType commandType = CommandType.Text, SqlTransaction? transaction = null, int commandTimeoutSecond = 30)
         {
             var command = new SqlCommand(commandText, dbConnection, transaction);
