@@ -7,35 +7,57 @@ namespace FastQueryLib
 {
     public class FastQuery : IDisposable
     {
-        private readonly SqlCommand _sqlCommand;
-        private readonly List<SqlInfoMessageEventArgs> _infoMessages;
+
+        #region VARIABLE
+
+        public readonly List<SqlInfoMessageEventArgs> InfoMessages = new();
+
+        protected SqlCommand SqlCommand;
+
+        #endregion
+
+        #region FIELDs
+
+        public int Id => SqlCommand.Connection.ClientConnectionId.GetHashCode();
+        public string Database => SqlCommand.Connection.Database;
+
+        #endregion
+
 
         public FastQuery(SqlConnection sqlConnection)
         {
-            _sqlCommand = new SqlCommand()
+            SqlCommand = new SqlCommand()
             {
                 Connection = sqlConnection
             };
-            _infoMessages = new List<SqlInfoMessageEventArgs>();
-            _sqlCommand.Connection.InfoMessage += Connection_InfoMessage;
+            SqlCommand.Connection.InfoMessage += Connection_InfoMessage;
         }
+
+        #region LOG
 
         private void Connection_InfoMessage(object sender, SqlInfoMessageEventArgs e)
         {
-            Debug.WriteLine(e);
-            _infoMessages.Add(e);
+            WriteLines(e);
+            InfoMessages.Add(e);
         }
 
-        public void Dispose()
+        private void WriteLines(Action writeContent)
         {
-            _sqlCommand.Connection.InfoMessage -= Connection_InfoMessage;
-            _sqlCommand.Dispose();
-            if (_sqlCommand.Connection != null)
-            {
-                if (_sqlCommand.Connection.State != ConnectionState.Closed) _sqlCommand.Connection.Close();
-            }
-            GC.SuppressFinalize(this);
+            Debug.WriteLine($"=============={this}==============");
+            writeContent.Invoke();
+            Debug.WriteLine($"==================================");
         }
+
+        private void WriteLines(object msg) => WriteLines(() => Debug.WriteLine(msg));
+
+        public override string ToString()
+        {
+            return $"{nameof(FastQuery)} [Id={Id}]";
+        }
+
+        #endregion
+
+        #region SETTING METHODS
 
         public FastQuery WithQuery(string commandText) => WithCustom(q => q.CommandText = commandText);
         public FastQuery WithParameters(Dictionary<string, object> parameters) => WithCustom(q => q.AddParameters(parameters));
@@ -44,52 +66,121 @@ namespace FastQueryLib
             if (transaction == null)
             {
                 EnsureOpenConnection();
-                transaction = _sqlCommand.Connection.BeginTransaction();
+                transaction = SqlCommand.Connection.BeginTransaction();
             }
             return WithCustom(q => q.Transaction = transaction);
         }
         public FastQuery WithCommandType(CommandType commandType) => WithCustom(q => q.CommandType = commandType);
         public FastQuery WithTimeout(int commandTimeoutSecond) => WithCustom(q => q.CommandTimeout = commandTimeoutSecond);
-
         public FastQuery WithCustom(Action<SqlCommand> custom)
         {
-            if (_sqlCommand == null) throw new Exception($"Call method {nameof(WithQuery)} to init {nameof(_sqlCommand)}");
-            custom?.Invoke(_sqlCommand);
+            custom.Invoke(SqlCommand);
             return this;
         }
+
+        #endregion
+
+        #region LOGIC METHODS 
+
+        public FastQuery UseDatabase(string dbName)
+        {
+            var conn = SqlCommand.Connection;
+            if (!conn.Database.Equals(dbName, StringComparison.CurrentCultureIgnoreCase))
+            {
+                if (conn.State == ConnectionState.Open)
+                {
+                    SqlCommand.Connection.ChangeDatabase(dbName);
+                }
+                else
+                {
+                    var builder = new SqlConnectionStringBuilder(conn.ConnectionString);
+                    builder.InitialCatalog = dbName;
+                    SqlCommand.Connection = new SqlConnection(builder.ConnectionString);
+                }
+            }
+            return this;
+        }
+
+        public FastQuery Clear()
+        {
+            //Rollback Transaction
+            SqlCommand.Transaction?.Rollback();
+            SqlCommand.Transaction = null;
+
+            //create new
+            var Connection = SqlCommand.Connection;
+            SqlCommand = new SqlCommand()
+            {
+                Connection = Connection
+            };
+            return this;
+        }
+
+
+        #endregion
+
+        #region Dispose
+
+        public void Dispose()
+        {
+            SqlCommand.Dispose();
+            SqlCommand.Connection.InfoMessage -= Connection_InfoMessage;
+            SqlCommand.Connection.Dispose();
+            Debug.WriteLine($"{this} Dispose");
+            GC.SuppressFinalize(this);
+        }
+
+        #endregion
+
+        #region Open/Close
+
+        public bool CloseConnection()
+        {
+            SqlCommand?.Connection?.Close();
+            var state = SqlCommand?.Connection?.State ?? ConnectionState.Closed;
+            return state == ConnectionState.Closed;
+        }
+
+        public void EnsureOpenConnection()
+        {
+            if (SqlCommand.Connection.State != ConnectionState.Open)
+            {
+                SqlCommand.Connection.Open();
+            }
+        }
+
+        #endregion
+
+        #region EXECUTE
 
         public async Task<T> ExecuteAsync<T>(Func<SqlCommand, Task<T>> execute)
         {
             try
             {
                 EnsureOpenConnection();
-
-                Debug.WriteLine($"ExecuteAsync: {_sqlCommand.CommandText} with Transaction");
-                var result = await execute.Invoke(_sqlCommand);
-
-                if (_sqlCommand.Transaction != null)
+                WriteLines(() =>
                 {
-                    await _sqlCommand.Transaction.CommitAsync();
+                    Debug.WriteLine(SqlCommand.CommandText);
+                    Debug.WriteLineIf(SqlCommand.Transaction != null, $"---------------\n{this} with Transaction", "ExecuteAsync");
+                });
+
+                var result = await execute.Invoke(SqlCommand);
+
+                if (SqlCommand.Transaction != null)
+                {
+                    await SqlCommand.Transaction.CommitAsync();
                 }
                 return result;
             }
             catch (Exception ex)
             {
-                Debug.WriteLine(ex);
-                if (_sqlCommand.Transaction != null)
+                WriteLines(ex);
+                if (SqlCommand.Transaction != null)
                 {
-                    await _sqlCommand.Transaction.RollbackAsync();
+                    await SqlCommand.Transaction.RollbackAsync();
                 }
-                throw new Exception(ex.Message, new Exception(JsonSerializer.Serialize(_infoMessages)));
-            }
-        }
-
-        public void EnsureOpenConnection()
-        {
-            if (_sqlCommand.Connection.State != ConnectionState.Open)
-            {
-                Debug.WriteLine($"Open connection: {_sqlCommand.Connection.Database}");
-                _sqlCommand.Connection.Open();
+                var json = InfoMessages.Any() ? new Exception(JsonSerializer.Serialize(InfoMessages)) : null;
+                throw new Exception($"{SqlCommand?.CommandText} => {ex.Message}", json);
             }
         }
 
@@ -103,7 +194,24 @@ namespace FastQueryLib
             return new FastQueryResult<List<T>>(this, data);
         }
 
-        public async Task<FastQueryResult<int>> ExecuteNumberOfRowsAsync() => new FastQueryResult<int>(this, await ExecuteAsync(q => q.ExecuteNonQueryAsync()));
+        public async Task<FastQueryResult<int>> ExecuteNonQueryAsync()
+            => new FastQueryResult<int>(this, await ExecuteAsync(q => q.ExecuteNonQueryAsync()));
+        public async Task<FastQueryResult<T?>> ExecuteScalarAsync<T>()
+        {
+            object? value = await ExecuteAsync(async q => await q.ExecuteScalarAsync());
+            return new FastQueryResult<T?>(this, (T?)value);
+        }
+
+        #endregion
+
+        #region Create Result
+
+        public FastQueryResult<T> Result<T>(T value)
+        {
+            return new FastQueryResult<T>(this, value);
+        }
+
+        #endregion
 
     }
 }

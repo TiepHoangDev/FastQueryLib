@@ -5,6 +5,7 @@
         public void Dispose()
         {
             FastQuery?.Dispose();
+            GC.SuppressFinalize(this);
         }
 
         public static implicit operator T(FastQueryResult<T> fastQuery) => fastQuery.Result;
