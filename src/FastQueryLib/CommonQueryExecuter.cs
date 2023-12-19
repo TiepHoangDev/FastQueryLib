@@ -25,6 +25,9 @@ namespace FastQueryLib
         public static async Task<FastQueryResult<int>> SetDatabaseReadOnly(this FastQuery fastQuery, bool isReadOnly)
         {
             var dbName = fastQuery.Database;
+            if (dbName.Equals("master", StringComparison.CurrentCultureIgnoreCase))
+                throw new Exception("Not allow work on database master!");
+
             var state = isReadOnly ? "READ_ONLY" : "READ_WRITE";
             var querySetReadOnLy = $"USE master; ALTER DATABASE {dbName} SET {state}; USE [{dbName}];";
             return await fastQuery.Clear().WithQuery(querySetReadOnLy).ExecuteNonQueryAsync();
@@ -38,7 +41,7 @@ namespace FastQueryLib
         {
             var dbName = fastQuery.Database;
             var queryCheckDbReady = $"SELECT COUNT(1) FROM sys.dm_exec_sessions WHERE database_id = DB_ID('{dbName}')";
-            return await fastQuery.Clear().WithQuery(queryCheckDbReady).ExecuteScalarAsync<int?>();
+            return await fastQuery.Clear().UseDatabase("master").WithQuery(queryCheckDbReady).ExecuteScalarAsync<int?>();
         }
 
         #endregion
@@ -69,8 +72,43 @@ namespace FastQueryLib
             return fastQuery.Result(true);
         }
 
-        #endregion
+        /// <summary>
+        /// move state of database to single mode and execute something with that mode.
+        /// after done, back to preview state.
+        /// </summary>
+        /// <param name="fastQuery"></param>
+        /// <param name="executer"></param>
+        /// <returns></returns>
+        public static async Task UseSingleUserModeAsync(this FastQuery fastQuery, Func<FastQuery, Task> executer)
+        {
+            var setToMutilMode = false;
+            try
+            {
+                //check current mode
+                var isSingleMode = await fastQuery.IsDatabaseSingleUserAsync();
+                if (!isSingleMode)
+                {
+                    setToMutilMode = await fastQuery.SetDatabaseSingleUserAsync(true);
+                }
 
+                //execute something
+                await executer.Invoke(fastQuery);
+            }
+            catch
+            {
+                throw;
+            }
+            finally
+            {
+                if (setToMutilMode)
+                {
+                    fastQuery.ThrowIfDisposed(new Exception("Please donot dispose fastQuery, we will use that connection to set back to mutil user mode."));
+                    await fastQuery.SetDatabaseSingleUserAsync(false);
+                }
+            }
+        }
+
+        #endregion
 
         #region GetStateDatabase
 

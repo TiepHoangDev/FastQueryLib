@@ -17,12 +17,10 @@ namespace FastQueryLib
         #endregion
 
         #region FIELDs
-
         public int Id => SqlCommand.Connection.ClientConnectionId.GetHashCode();
         public string Database => SqlCommand.Connection.Database;
-
+        public bool Disposed { get; set; }
         #endregion
-
 
         public FastQuery(SqlConnection sqlConnection)
         {
@@ -93,8 +91,10 @@ namespace FastQueryLib
                 }
                 else
                 {
-                    var builder = new SqlConnectionStringBuilder(conn.ConnectionString);
-                    builder.InitialCatalog = dbName;
+                    var builder = new SqlConnectionStringBuilder(conn.ConnectionString)
+                    {
+                        InitialCatalog = dbName
+                    };
                     SqlCommand.Connection = new SqlConnection(builder.ConnectionString);
                 }
             }
@@ -123,10 +123,12 @@ namespace FastQueryLib
 
         public void Dispose()
         {
-            SqlCommand.Dispose();
             SqlCommand.Connection.InfoMessage -= Connection_InfoMessage;
+            SqlCommand.Connection.Close();
             SqlCommand.Connection.Dispose();
+            SqlCommand.Dispose();
             Debug.WriteLine($"{this} Dispose");
+            Disposed = true;
             GC.SuppressFinalize(this);
         }
 
@@ -151,10 +153,21 @@ namespace FastQueryLib
 
         #endregion
 
+        public FastQuery ThrowIfDisposed(Exception? exception = null)
+        {
+            if (Disposed)
+            {
+                throw exception ?? throw new Exception($"{nameof(FastQuery)} has disposed. {this}");
+            }
+            return this;
+        }
+
         #region EXECUTE
 
         public async Task<T> ExecuteAsync<T>(Func<SqlCommand, Task<T>> execute)
         {
+            ThrowIfDisposed();
+
             try
             {
                 EnsureOpenConnection();
