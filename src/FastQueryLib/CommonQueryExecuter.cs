@@ -52,7 +52,7 @@ namespace FastQueryLib
         {
             var dbName = fastQuery.Database;
             var query = $"SELECT TOP 1 user_access_desc FROM sys.databases WHERE name = '{dbName}';";
-            var user_access_desc = await fastQuery.Clear().WithQuery(query).ExecuteScalarAsync<string?>();
+            var user_access_desc = await fastQuery.Clear().WithQuery(query).ExecuteScalarAsync<string>();
             if (user_access_desc.Result == null)
             {
                 user_access_desc.Dispose();
@@ -113,23 +113,25 @@ namespace FastQueryLib
         #region GetStateDatabase
 
 
-        public static async Task<string?> GetStateDatabase(this FastQuery fastQuery, string databasename)
+        public static async Task<string> GetStateDatabase(this FastQuery fastQuery, string databasename)
         {
             var query_checking = $"USE master; SELECT state_desc FROM sys.databases WHERE name = '{databasename}';";
-            using var checkingresult = await fastQuery
+            using (var checkingresult = await fastQuery
                 .UseDatabase("master")
                 .WithQuery(query_checking)
-                .ExecuteScalarAsync<string?>();
-            return checkingresult.Result;
+                .ExecuteScalarAsync<string>())
+            {
+                return checkingresult.Result;
+            }
         }
 
-        public static async Task<bool> CheckDatabaseOnline(this FastQuery fastQuery, string? databasename = null)
+        public static async Task<bool> CheckDatabaseOnline(this FastQuery fastQuery, string databasename = null)
         {
             var state = await fastQuery.GetStateDatabase(databasename ?? fastQuery.Database);
             return state?.Equals("ONLINE", StringComparison.OrdinalIgnoreCase) ?? false;
         }
 
-        public static async Task<bool> CheckDatabaseExistsAsync(this FastQuery fastQuery, string? databasename = null)
+        public static async Task<bool> CheckDatabaseExistsAsync(this FastQuery fastQuery, string databasename = null)
         {
             var state = await fastQuery.GetStateDatabase(databasename ?? fastQuery.Database);
             return string.IsNullOrWhiteSpace(state) == false;

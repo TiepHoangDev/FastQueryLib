@@ -1,4 +1,7 @@
 ﻿using Microsoft.Data.SqlClient;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace FastQueryLib
 {
@@ -10,9 +13,9 @@ namespace FastQueryLib
         }
 
 
-        public static List<string> SYSTEM_DB = new() { "master", "model", "msdb", "tempdb" };
+        public static List<string> SYSTEM_DB = new List<string>() { "master", "model", "msdb", "tempdb" };
 
-        public static FastQuery ThrowIfIsSystemDb(this FastQuery fastQuery, Exception? exception = null)
+        public static FastQuery ThrowIfIsSystemDb(this FastQuery fastQuery, Exception exception = null)
         {
             if (SYSTEM_DB.Any(q => q.Equals(fastQuery.Database, StringComparison.CurrentCultureIgnoreCase)))
             {

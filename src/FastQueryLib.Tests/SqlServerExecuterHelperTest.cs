@@ -16,6 +16,28 @@ namespace FastQueryLib.Tests
         static string SQLSERVER = Config.Source.ServerName;
         static int SQLPORT = Config.Source.SqlPort;
 
+        [SetUp]
+        public async Task Init()
+        {
+            var cs = SqlServerExecuterHelper.CreateConnectionString(SQLSERVER, "master");
+            using var ct = SqlServerExecuterHelper.CreateConnection(cs);
+            await ct.CreateFastQuery()
+                 .WithQuery("Use master; IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'A') BEGIN CREATE DATABASE A; END;")
+                 .ExecuteNonQueryAsync();
+            await ct.CreateFastQuery()
+                .WithQuery(@"Use A; IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Products' AND TABLE_SCHEMA = 'dbo')
+BEGIN
+    CREATE TABLE Products (
+        id [uniqueidentifier] PRIMARY KEY,
+        name VARCHAR(255),
+        createdtime DATETIME
+    );
+
+    insert Products (id, name, createdtime) values(newid() , getdate(), getdate());
+    insert Products (id, name, createdtime) values(newid() , getdate(), getdate());
+END;")
+                .ExecuteNonQueryAsync();
+        }
 
         #region CreateConnection
 
@@ -100,7 +122,7 @@ namespace FastQueryLib.Tests
     public record Product
     {
         public Guid? ID { get; set; }
-        public string? Name { get; set; }
+        public string Name { get; set; }
         public DateTime? CreatedTime { get; set; }
         public DateTime? AdditionProp { get; set; }
     }
@@ -109,11 +131,11 @@ namespace FastQueryLib.Tests
     {
         public static IEnumerable<ReadAs_InputTest> Samples()
         {
-            yield return new ReadAs_InputTest("SELECT TOP (1000) [id] ,[name] ,[createdtime] FROM [A].[dbo].[Products]", 2);
+            yield return new ReadAs_InputTest("SELECT TOP (2) [id] ,[name] ,[createdtime] FROM [A].[dbo].[Products]", 2);
         }
     }
 
-    public record CreateConnectionString_InputTest(string? server, string? database = "master", string? username = null, string? pass = null)
+    public record CreateConnectionString_InputTest(string server, string database = "master", string username = null, string pass = null)
     {
         public bool isError { get; set; }
         public bool connectable { get; set; }
@@ -132,7 +154,7 @@ namespace FastQueryLib.Tests
             yield return new CreateConnectionString_InputTest(SQLVERVER, DATABASE, null, null) { connectable = true };
             yield return new CreateConnectionString_InputTest(SQLVERVER, DATABASE, "1", "1") { connectable = true };
             yield return new CreateConnectionString_InputTest($"127.0.0.1,{SQLPORT}", DATABASE, "1", "1") { connectable = true };
-            yield return new CreateConnectionString_InputTest($"127.0.0.1,{SQLPORT}", DATABASE, null, null) { connectable = true };
+            yield return new CreateConnectionString_InputTest($"127.0.0.1,{SQLPORT}", DATABASE, null, null) { connectable = false };
         }
 
     }

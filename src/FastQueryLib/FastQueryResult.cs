@@ -1,7 +1,18 @@
-﻿namespace FastQueryLib
+﻿using System;
+
+namespace FastQueryLib
 {
-    public record FastQueryResult<T>(FastQuery FastQuery, T Result) : IDisposable
+    public class FastQueryResult<T> : IDisposable
     {
+        public FastQuery FastQuery { get; private set; }
+        public T Result { get; private set; }
+
+        public FastQueryResult(FastQuery fastQuery, T result)
+        {
+            FastQuery = fastQuery;
+            Result = result;
+        }
+
         public void Dispose()
         {
             FastQuery?.Dispose();

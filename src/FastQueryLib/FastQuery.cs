@@ -1,7 +1,11 @@
 ﻿using Microsoft.Data.SqlClient;
+using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
+using System.Linq;
 using System.Text.Json;
+using System.Threading.Tasks;
 
 namespace FastQueryLib
 {
@@ -10,7 +14,7 @@ namespace FastQueryLib
 
         #region VARIABLE
 
-        public readonly List<SqlInfoMessageEventArgs> InfoMessages = new();
+        public readonly List<SqlInfoMessageEventArgs> InfoMessages = new List<SqlInfoMessageEventArgs>();
 
         protected SqlCommand SqlCommand;
 
@@ -59,7 +63,7 @@ namespace FastQueryLib
 
         public FastQuery WithQuery(string commandText) => WithCustom(q => q.CommandText = commandText);
         public FastQuery WithParameters(Dictionary<string, object> parameters) => WithCustom(q => q.AddParameters(parameters));
-        public FastQuery WithTransaction(SqlTransaction? transaction = null)
+        public FastQuery WithTransaction(SqlTransaction transaction = null)
         {
             if (transaction == null)
             {
@@ -153,7 +157,7 @@ namespace FastQueryLib
 
         #endregion
 
-        public FastQuery ThrowIfDisposed(Exception? exception = null)
+        public FastQuery ThrowIfDisposed(Exception exception = null)
         {
             if (Disposed)
             {
@@ -179,19 +183,13 @@ namespace FastQueryLib
 
                 var result = await execute.Invoke(SqlCommand);
 
-                if (SqlCommand.Transaction != null)
-                {
-                    await SqlCommand.Transaction.CommitAsync();
-                }
+                SqlCommand.Transaction?.Commit();
                 return result;
             }
             catch (Exception ex)
             {
                 WriteLines(ex);
-                if (SqlCommand.Transaction != null)
-                {
-                    await SqlCommand.Transaction.RollbackAsync();
-                }
+                SqlCommand.Transaction?.Rollback();
                 var json = InfoMessages.Any() ? new Exception(JsonSerializer.Serialize(InfoMessages)) : null;
                 throw new Exception($"{SqlCommand?.CommandText} => {ex.Message}", json);
             }
@@ -201,18 +199,20 @@ namespace FastQueryLib
         {
             var data = await ExecuteAsync(async q =>
             {
-                using var reader = await q.ExecuteReaderAsync();
-                return reader.ReadAs<T>().ToList();
+                using (var reader = await q.ExecuteReaderAsync())
+                {
+                    return reader.ReadAs<T>().ToList();
+                }
             });
             return new FastQueryResult<List<T>>(this, data);
         }
 
         public async Task<FastQueryResult<int>> ExecuteNonQueryAsync()
             => new FastQueryResult<int>(this, await ExecuteAsync(q => q.ExecuteNonQueryAsync()));
-        public async Task<FastQueryResult<T?>> ExecuteScalarAsync<T>()
+        public async Task<FastQueryResult<T>> ExecuteScalarAsync<T>()
         {
-            object? value = await ExecuteAsync(async q => await q.ExecuteScalarAsync());
-            return new FastQueryResult<T?>(this, (T?)value);
+            object value = await ExecuteAsync(async q => await q.ExecuteScalarAsync());
+            return new FastQueryResult<T>(this, (T)value);
         }
 
         #endregion
