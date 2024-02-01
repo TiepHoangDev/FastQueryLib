@@ -1,10 +1,9 @@
-﻿using Microsoft.Data.SqlClient;
+﻿using System.Data.SqlClient;
 using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
 using System.Linq;
-using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace FastQueryLib
@@ -190,8 +189,10 @@ namespace FastQueryLib
             {
                 WriteLines(ex);
                 SqlCommand.Transaction?.Rollback();
-                var json = InfoMessages.Any() ? new Exception(JsonSerializer.Serialize(InfoMessages)) : null;
-                throw new Exception($"{SqlCommand?.CommandText} => {ex.Message}", json);
+                throw new FastQueryExecuteException($"{SqlCommand?.CommandText} => {ex.Message}", ex)
+                {
+                    InfoMessages = InfoMessages,
+                };
             }
         }
 
